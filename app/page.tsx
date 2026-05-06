@@ -658,7 +658,7 @@ function SchemaView({
 
 function DataView({
   tableName, columns, primaryKeys, rows, total, page, totalPages,
-  loading, onPageChange, onInsertRow, onEditRow, onDeleteRow,
+  loading, onPageChange, onInsertRow, onEditRow, onDeleteRow, onDeleteSelectedRows,
 }: {
   tableName: string;
   columns: Column[];
@@ -672,7 +672,33 @@ function DataView({
   onInsertRow: () => void;
   onEditRow: (row: Record<string, unknown>) => void;
   onDeleteRow: (row: Record<string, unknown>) => void;
+  onDeleteSelectedRows: (rows: Record<string, unknown>[]) => Promise<void>;
 }) {
+  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
+  const [confirmDeleteSelected, setConfirmDeleteSelected] = useState(false);
+  const selectAllRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => setSelectedRows(new Set()), [rows]);
+
+  const allSelected = rows.length > 0 && selectedRows.size === rows.length;
+  const someSelected = selectedRows.size > 0 && !allSelected;
+
+  useEffect(() => {
+    if (selectAllRef.current) selectAllRef.current.indeterminate = someSelected;
+  }, [someSelected]);
+
+  const toggleAll = () => {
+    setSelectedRows(allSelected ? new Set() : new Set(rows.map((_, i) => i)));
+  };
+
+  const toggleRow = (i: number) => {
+    setSelectedRows(prev => {
+      const next = new Set(prev);
+      next.has(i) ? next.delete(i) : next.add(i);
+      return next;
+    });
+  };
+
   const start = (page - 1) * PAGE_SIZE + 1;
   const end = Math.min(page * PAGE_SIZE, total);
 
@@ -680,9 +706,27 @@ function DataView({
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Toolbar */}
       <div className="flex items-center justify-between px-5 py-2.5 border-b border-gray-800 flex-shrink-0">
-        <span className="text-[10px] text-gray-600">
-          {total > 0 ? `${start.toLocaleString()}–${end.toLocaleString()} of ${total.toLocaleString()} rows` : `${total} rows`}
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="text-[10px] text-gray-600">
+            {total > 0 ? `${start.toLocaleString()}–${end.toLocaleString()} of ${total.toLocaleString()} rows` : `${total} rows`}
+          </span>
+          {selectedRows.size > 0 && (
+            <span className="text-[10px] text-blue-400 font-medium bg-blue-900/20 px-2 py-0.5 rounded border border-blue-800/40">
+              {selectedRows.size} selected
+            </span>
+          )}
+          {selectedRows.size > 0 && (
+            <button
+              onClick={() => setConfirmDeleteSelected(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-red-700 hover:bg-red-600 rounded text-xs text-white font-medium transition-colors"
+            >
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              Delete {selectedRows.size} row{selectedRows.size !== 1 ? 's' : ''}
+            </button>
+          )}
+        </div>
         <button
           onClick={onInsertRow}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-xs text-white font-medium transition-colors"
@@ -693,6 +737,16 @@ function DataView({
           Insert Row
         </button>
       </div>
+      {confirmDeleteSelected && (
+        <ConfirmModal
+          message={`Delete ${selectedRows.size} selected row${selectedRows.size !== 1 ? 's' : ''} from "${tableName}"? This cannot be undone.`}
+          onConfirm={async () => {
+            await onDeleteSelectedRows(Array.from(selectedRows).map(i => rows[i]));
+            setSelectedRows(new Set());
+          }}
+          onClose={() => setConfirmDeleteSelected(false)}
+        />
+      )}
 
       {/* Table */}
       <div className="flex-1 overflow-auto">
@@ -706,6 +760,16 @@ function DataView({
           <table className="w-full text-xs border-collapse min-w-max">
             <thead className="sticky top-0 z-10">
               <tr className="border-b border-gray-800 bg-gray-950">
+                <th className="w-8 py-2 px-3 bg-gray-950 border-r border-gray-800/50">
+                  <input
+                    ref={selectAllRef}
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={toggleAll}
+                    className="accent-blue-500 cursor-pointer"
+                    title="Select all rows on this page"
+                  />
+                </th>
                 <th className="w-16 py-2 px-2 bg-gray-950 border-r border-gray-800/50"></th>
                 {columns.map(col => (
                   <th key={col.column_name} className="text-left py-2 px-3 whitespace-nowrap border-r border-gray-800/50 last:border-r-0 bg-gray-950">
@@ -722,7 +786,20 @@ function DataView({
             </thead>
             <tbody>
               {rows.map((row, i) => (
-                <tr key={i} className="border-b border-gray-800/30 hover:bg-gray-800/20 group">
+                <tr
+                  key={i}
+                  className={`border-b border-gray-800/30 group transition-colors ${
+                    selectedRows.has(i) ? 'bg-blue-950/30 hover:bg-blue-950/40' : 'hover:bg-gray-800/20'
+                  }`}
+                >
+                  <td className="py-1.5 px-3 border-r border-gray-800/20">
+                    <input
+                      type="checkbox"
+                      checked={selectedRows.has(i)}
+                      onChange={() => toggleRow(i)}
+                      className="accent-blue-500 cursor-pointer"
+                    />
+                  </td>
                   <td className="py-1.5 px-2 border-r border-gray-800/20">
                     <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
@@ -895,6 +972,15 @@ export default function Home() {
     refreshRows();
   }, [selectedTable, tableState, refreshRows]);
 
+  // Bulk delete handler
+  const handleDeleteSelectedRows = useCallback(async (selectedRowData: Record<string, unknown>[]) => {
+    if (!selectedTable || !tableState) return;
+    const conditions = selectedRowData.map(row => `(${buildWhere(row, tableState.primaryKeys, tableState.columns)})`).join(' OR ');
+    const res = await execute(`DELETE FROM "${selectedTable}" WHERE ${conditions}`);
+    if (res.error) throw new Error(res.error);
+    refreshRows();
+  }, [selectedTable, tableState, refreshRows]);
+
   const filteredTables = tables.filter(t =>
     t.toLowerCase().includes(search.toLowerCase())
   );
@@ -1059,6 +1145,7 @@ export default function Home() {
                 onInsertRow={() => setAddRowModal(true)}
                 onEditRow={row => setEditRowModal(row)}
                 onDeleteRow={row => setDeleteRowModal(row)}
+                onDeleteSelectedRows={handleDeleteSelectedRows}
               />
             ) : tableState && activeTab === 'query' ? (
               <QueryView initialSql={queryInitialSql} />
